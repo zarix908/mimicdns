@@ -1,6 +1,7 @@
 use std::io;
 use std::result;
 
+use base64::DecodeSliceError;
 use base64::EncodeSliceError;
 use domain::base::message_builder::PushError;
 use domain::rdata::rfc1035::TxtAppendError;
@@ -12,6 +13,7 @@ pub enum Err {
     Bind(io::Error),
     Receive(io::Error),
     Base64Encode(EncodeSliceError),
+    Base64Decode(DecodeSliceError),
     BuildTxtRecord(TxtAppendError),
     BuildDnsQuestion(PushError),
     BuildDnsAnswer(PushError),
