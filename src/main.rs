@@ -3,13 +3,12 @@ mod result;
 use crate::result::Err;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use domain::{
-    base::{MessageBuilder, Name, Rtype},
-    rdata::Txt,
+    base::{MessageBuilder, Name, Rtype}, dep::octseq::Array, rdata::Txt
 };
 use result::Result;
-use std::{net::UdpSocket, str::FromStr};
+use std::{net::{SocketAddr, UdpSocket}, str::FromStr};
 
-const MTU: u16 = 1600;
+const MTU: usize = 1600;
 
 fn main() {
     if let Err(e) = run() {
@@ -25,41 +24,56 @@ fn main() {
 
         return;
     }
-
-    println!("wrapped message successfully");
 }
 
 fn run() -> Result<()> {
-    let socket = UdpSocket::bind("127.0.0.1:5555").map_err(Err::Bind)?;
+    let recv_socket = UdpSocket::bind("127.0.0.1:5555").map_err(Err::Bind)?;
+    let send_socket = UdpSocket::bind(("127.0.0.1", 30006)).map_err(Err::Send)?;
+    
+    let mut data = [0u8; MTU];
+    let mut data_base64 = [0u8; MTU * 4 / 3 + 4];
+
+    let mut target: Option<Vec<u8>> = None;
 
     println!("listen...");
 
-    let mut buf = [0u8; MTU as usize];
-    let (count, addr) = socket.recv_from(&mut buf).map_err(Err::Receive)?;
-    let data = &buf[0..count];
+    let name = Name::<Array<MTU>>::from_str("txt.zarix908.com").unwrap();
 
-    let mut data_base64 = [0u8; (MTU * 4 / 3 + 4) as usize];
-    let count = STANDARD
-        .encode_slice(data, &mut data_base64)
-        .map_err(Err::Base64Encode)?;
-    let data = &data_base64[0..count];
+    loop {
+        let (count, addr) = recv_socket.recv_from(&mut data).map_err(Err::Receive)?;
+        let data = &data[0..count];
 
-    let mut msg = MessageBuilder::new_vec();
-    
+        let count = STANDARD
+            .encode_slice(data, &mut data_base64)
+            .map_err(Err::Base64Encode)?;
+        let data = &data_base64[0..count];
+
+        let buf = target.take().unwrap_or_else(Vec::new);
+        send_answer(buf, &name, data, &send_socket, addr)?;
+    }
+}
+
+fn send_answer(
+    target: Vec<u8>, 
+    name: &Name<Array<MTU>>, 
+    data: &[u8],
+    socket: &UdpSocket, 
+    addr: SocketAddr,
+) -> Result<Vec<u8>> {
+    let mut msg = MessageBuilder::from_target(target).unwrap();
     msg.header_mut().set_qr(true);
 
     let mut msg = msg.question();
-    let name = Name::<Vec<u8>>::from_str("txt.zarix908.com").unwrap();
-    msg.push((&name, Rtype::TXT))
-        .map_err(Err::BuildDnsQuestion)?;
+    msg.push((name, Rtype::TXT)).map_err(Err::BuildDnsQuestion)?;
 
     let mut msg = msg.answer();
     let txt = Txt::<Vec<u8>>::build_from_slice(data).map_err(Err::BuildTxtRecord)?;
-    msg.push((&name, 60, txt)).map_err(Err::BuildDnsAnswer)?;
+    msg.push((name, 60, txt)).map_err(Err::BuildDnsAnswer)?;
 
-    let target = msg.finish();
+    let data = msg.finish();
+    socket.send_to(&data, addr).map_err(Err::Send)?;
 
-    socket.send_to(&target, addr).map_err(Err::Send)?;
+    println!("sent");
 
-    Ok(())
+    Ok(data)
 }
