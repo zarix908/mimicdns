@@ -7,6 +7,7 @@ use domain::rdata::rfc1035::TxtAppendError;
 
 pub type Result<T> = result::Result<T, Err>;
 
+#[derive(Debug)]
 pub enum Err {
     Bind(io::Error),
     Receive(io::Error),

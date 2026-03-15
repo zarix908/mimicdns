@@ -1,14 +1,12 @@
 mod result;
+mod dnswrap;
 
-use crate::result::Err;
+use crate::{dnswrap::DnsWrapper, result::Err};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use domain::{
-    base::{Message, MessageBuilder, Name, Rtype, iana::Rcode}, dep::octseq::Array, rdata::Txt
-};
 use result::Result;
-use std::{net::UdpSocket, str::FromStr};
+use std::net::UdpSocket;
 
-const DNS_WRAP_LEN: usize = 100;
+const DNS_WRAP_LEN: usize = 110;
 const MTU: usize = 1600;
 const INPUT_MTU: usize = MTU - DNS_WRAP_LEN;
 
@@ -35,10 +33,8 @@ fn run() -> Result<()> {
     let mut data = [0u8; INPUT_MTU];
     let mut data_base64 = [0u8; INPUT_MTU * 4 / 3 + 4];
 
-    let mut target = Vec::new();
-    let name = Name::<Array<18>>::from_str("txt.zarix908.com").unwrap();
-    let question = build_question(&name)?;
-    let msg = Message::from_slice(&question).unwrap(); 
+    let mut dns_packet = Vec::new();
+    let dns_wrapper = DnsWrapper::new();
 
     println!("listen...");
 
@@ -51,32 +47,7 @@ fn run() -> Result<()> {
             .map_err(Err::Base64Encode)?;
         let data = &data_base64[0..count];
 
-        let answer = build_answer(target, msg, &name, data)?;
-        send_socket.send_to(&answer, addr).map_err(Err::Send)?;
-        target = answer
+        dns_wrapper.wrap_to(&mut dns_packet, data)?;
+        send_socket.send_to(&dns_packet, addr).map_err(Err::Send)?;
     }
-}
-
-fn build_question(name: &Name<Array<18>>) -> Result<Vec<u8>> {
-    let mut msg = MessageBuilder::new_vec();
-    msg.header_mut().set_qr(true);
-
-    let mut msg = msg.question();
-    msg.push((name, Rtype::TXT)).map_err(Err::BuildDnsQuestion)?;
-
-    Ok(msg.finish())
-}
-
-fn build_answer(
-    target: Vec<u8>,
-    question_msg: &Message<[u8]>, 
-    name: &Name<Array<18>>, 
-    data: &[u8],
-) -> Result<Vec<u8>> {
-    let mut msg = MessageBuilder::from_target(target).unwrap().start_answer(question_msg, Rcode::NOERROR).map_err(Err::BuildDnsQuestion)?;
-
-    let txt = Txt::<Vec<u8>>::build_from_slice(data).map_err(Err::BuildTxtRecord)?;
-    msg.push((name, 60, txt)).map_err(Err::BuildDnsAnswer)?;
-
-    Ok(msg.finish())
 }
