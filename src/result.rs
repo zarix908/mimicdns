@@ -3,6 +3,7 @@ use std::result;
 
 use base64::DecodeSliceError;
 use base64::EncodeSliceError;
+use crossbeam_channel::RecvError;
 use domain::base::message_builder::PushError;
 use domain::rdata::rfc1035::TxtAppendError;
 
@@ -18,4 +19,7 @@ pub enum Err {
     BuildDnsQuestion(PushError),
     BuildDnsAnswer(PushError),
     Send(io::Error),
+    Lock(String),
+    FreePacketRecv(RecvError),
+    ParseDnsPacket()
 }
